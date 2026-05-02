@@ -1,67 +1,73 @@
-use anyhow::Context as _;
-use aya::programs::{Xdp, XdpFlags};
+use anyhow::Result;
 use clap::Parser;
-#[rustfmt::skip]
-use log::{debug, warn};
+use std::net::Ipv4Addr;
 use tokio::signal;
 
-#[derive(Debug, Parser)]
-struct Opt {
-    #[clap(short, long, default_value = "enp10s0")]
-    iface: String,
+use aya::maps::HashMap;
+
+use xdp_fw::cli::Opt;
+use xdp_fw::loader::{attach_xdp, bump_memlock_rlimit, init_aya_log, load_ebpf};
+
+use xdp_fw_common::rules::rules::{Action, FlowKey, Protocol, Rule};
+
+fn insert_rule(
+    rules: &mut HashMap<&mut aya::maps::MapData, FlowKey, Rule>,
+    src_ip: &str,
+    src_port: u16,
+    dest_ip: &str,
+    dest_port: u16,
+    protocol: Protocol,
+    action: Action,
+) -> Result<()> {
+    let src_ip: Ipv4Addr = src_ip.parse()?;
+    let dest_ip: Ipv4Addr = dest_ip.parse()?;
+
+    let key = FlowKey {
+        src_ip: src_ip.octets(),
+    };
+    let rule = Rule {
+        src_ip: src_ip.octets(),
+        src_port,
+        dest_ip: dest_ip.octets(),
+        dest_port,
+        protocol: protocol as u8,
+        action: action as u8,
+    };
+
+    // flags=0 means create-or-update existing key.
+    rules.insert(key, rule, 0)?;
+    Ok(())
 }
 
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     let opt = Opt::parse();
-
     env_logger::init();
+    bump_memlock_rlimit();
 
-    // Bump the memlock rlimit. This is needed for older kernels that don't use the
-    // new memcg based accounting, see https://lwn.net/Articles/837122/
-    let rlim = libc::rlimit {
-        rlim_cur: libc::RLIM_INFINITY,
-        rlim_max: libc::RLIM_INFINITY,
-    };
-    let ret = unsafe { libc::setrlimit(libc::RLIMIT_MEMLOCK, &rlim) };
-    if ret != 0 {
-        debug!("remove limit on locked memory failed, ret is: {ret}");
-    }
+    let mut ebpf = load_ebpf()?;
 
-    // This will include your eBPF object file as raw bytes at compile-time and load it at
-    // runtime. This approach is recommended for most real-world use cases. If you would
-    // like to specify the eBPF program at runtime rather than at compile-time, you can
-    // reach for `Bpf::load_file` instead.
-    let mut ebpf = aya::Ebpf::load(aya::include_bytes_aligned!(concat!(
-        env!("OUT_DIR"),
-        "/xdp-fw"
-    )))?;
-    match aya_log::EbpfLogger::init(&mut ebpf) {
-        Err(e) => {
-            // This can happen if you remove all log statements from your eBPF program.
-            warn!("failed to initialize eBPF logger: {e}");
-        }
-        Ok(logger) => {
-            let mut logger =
-                tokio::io::unix::AsyncFd::with_interest(logger, tokio::io::Interest::READABLE)?;
-            tokio::task::spawn(async move {
-                loop {
-                    let mut guard = logger.readable_mut().await.unwrap();
-                    guard.get_inner_mut().flush();
-                    guard.clear_ready();
-                }
-            });
-        }
-    }
-    let Opt { iface } = opt;
-    let program: &mut Xdp = ebpf.program_mut("xdp_fw").unwrap().try_into()?;
-    program.load()?;
-    program.attach(&iface, XdpFlags::default())
-        .context("failed to attach the XDP program with default flags - try changing XdpFlags::default() to XdpFlags::SKB_MODE")?;
-    let ctrl_c = signal::ctrl_c();
-    println!("Waiting for Ctrl-C...");
-    ctrl_c.await?;
-    println!("Exiting...");
+    init_aya_log(&mut ebpf);
+
+    attach_xdp(&mut ebpf, &opt.iface)?;
+
+    // map access MUST come from same ebpf instance
+    let mut rules: HashMap<_, FlowKey, Rule> =
+        HashMap::try_from(ebpf.map_mut("RULES").unwrap())?;
+
+    insert_rule(
+        &mut rules,
+        "1.1.1.1",
+        0,
+        "0.0.0.0",
+        0,
+        Protocol::Any,
+        Action::Drop,
+    )?;
+
+    println!("Ctrl-C to exit.");
+    signal::ctrl_c().await?;
 
     Ok(())
 }

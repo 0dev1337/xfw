@@ -1,2 +1,5 @@
+[target.bpfel-unknown-none]
+rustflags = ["-C", "panic=abort"]
+
 [target."cfg(all())"]
 runner = "sudo -E"

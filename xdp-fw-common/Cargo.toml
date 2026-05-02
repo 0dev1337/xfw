@@ -7,7 +7,7 @@ license.workspace = true
 
 [features]
 default = []
-user = ["aya"]
+user = ["dep:aya"]
 
 [dependencies]
 aya = { workspace = true, optional = true }
