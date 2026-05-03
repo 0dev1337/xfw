@@ -3,9 +3,9 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::Terminal;
-use std::io;
+use std::{io, sync::Arc};
 
-use aya::maps::{MapData, RingBuf};
+use tokio::sync::Mutex;
 
 use crate::{app::App, event, ui};
 
@@ -24,21 +24,22 @@ impl Tui {
         Ok(Self { terminal })
     }
 
-    pub async fn run(
-        &mut self,
-        app: &mut App,
-        ring: &mut RingBuf<&mut MapData>,
-    ) -> io::Result<()> {
+    pub async fn run(&mut self, app: Arc<Mutex<App>>) -> io::Result<()> {
         loop {
-            self.terminal
-                .draw(|f| ui::draw(f, app, ring))?;
+            let should_exit = {
+                let mut app = app.lock().await;
 
-            if crossterm::event::poll(std::time::Duration::from_millis(50))? {
-                let event = crossterm::event::read()?;
-                event::handle_event(app, event);
-            }
+                self.terminal.draw(|f| ui::draw(f, &mut *app))?;
 
-            if app.should_exit {
+                if crossterm::event::poll(std::time::Duration::from_millis(50))? {
+                    let event = crossterm::event::read()?;
+                    event::handle_event(&mut *app, event);
+                }
+
+                app.should_exit
+            };
+
+            if should_exit {
                 break;
             }
         }

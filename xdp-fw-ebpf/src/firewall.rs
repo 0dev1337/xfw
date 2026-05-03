@@ -67,17 +67,8 @@ pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
             1 => Ok(XDP_DROP),
             _ => Ok(XDP_PASS),
         };
-    }else{
+    } else {
         let ip = Ipv4Addr::from(src);
-        // info!(
-        //     &ctx,
-        //     "rule mismatch src={} sport={} dport={} proto={} action={}",
-        //     ip,
-        //     source_port,
-        //     dest_port,
-        //     protocol,
-        //     0
-        // );
         if let Some(mut slot) = LOGS.reserve::<LogEvent>(0) {
             slot.write(LogEvent {
                 src_ip: ip.octets(),
@@ -89,11 +80,6 @@ pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
             slot.submit(0);
         }
     }
-    // if src {
-    //     let ip = Ipv4Addr::from(src);
-    //     info!(&ctx, "drop {}:{}", ip,source_port);
-    //     return Ok(XDP_DROP);
-    // }
 
-   Ok(XDP_PASS)
+    Ok(XDP_PASS)
 }

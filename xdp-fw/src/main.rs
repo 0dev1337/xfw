@@ -1,16 +1,48 @@
 use anyhow::Result;
 use clap::Parser;
-use std::net::Ipv4Addr;
-use tokio::signal;
-
+use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use aya::maps::{HashMap, RingBuf};
+use tokio::{sync::Mutex, time};
 
+use rand::Rng;
+
+#[allow(unused_imports)]
 use xdp_fw::app::App;
 use xdp_fw::cli::Opt;
 use xdp_fw::loader::{attach_xdp, bump_memlock_rlimit, init_aya_log, load_ebpf};
+#[allow(unused_imports)]
 use xdp_fw::tui::Tui;
-
+use xdp_fw_common::logs::logs::LogEvent;
 use xdp_fw_common::rules::rules::{Action, FlowKey, Protocol, Rule};
+
+fn drain_log_ring_once(log_ring: &mut RingBuf<&mut aya::maps::MapData>,app: &mut App) {
+    while let Some(item) = log_ring.next() {
+        let data: &[u8] = &*item;
+
+        if data.len() < std::mem::size_of::<LogEvent>() {
+            continue;
+        }
+
+        let event =
+            unsafe { std::ptr::read_unaligned(data.as_ptr().cast::<LogEvent>()) };
+
+        let ip = std::net::Ipv4Addr::from(event.src_ip);
+
+        // println!(
+        //     "ip={ip} sport={} dport={} proto={} action={}",
+        //     event.source_port,
+        //     event.dest_port,
+        //     event.protocol,
+        //     event.action,
+        // );
+
+        app.logs.push(format!("ip={ip} sport={} dport={} proto={} action={}",
+                              event.source_port,
+                              event.dest_port,
+                              event.protocol,
+                              event.action,))
+    }
+}
 
 fn insert_rule(
     rules: &mut HashMap<&mut aya::maps::MapData, FlowKey, Rule>,
@@ -57,7 +89,7 @@ async fn main() -> Result<()> {
             HashMap::try_from(ebpf.map_mut("RULES").expect("RULES map"))?;
         insert_rule(
             &mut rules,
-            "1.1.1.1",
+            "1.1.1.2",
             0,
             "0.0.0.0",
             0,
@@ -66,14 +98,35 @@ async fn main() -> Result<()> {
         )?;
     }
 
-    let mut log_ring = RingBuf::try_from(ebpf.map_mut("LOGS").expect("LOGS ring buffer"))?;
+    let app = Arc::new(Mutex::new(App::new()));
+    let app_drain = Arc::clone(&app);
 
-    let mut app = App::new();
+
+    println!("Polling LOGS ring (Ctrl+C to exit).");
+
+    let _drain_join = tokio::spawn(async move {
+        let mut ebpf = ebpf;
+
+        let ctrl_c = tokio::signal::ctrl_c();
+        tokio::pin!(ctrl_c);
+        loop {
+            let mut log_ring =
+                match RingBuf::try_from(ebpf.map_mut("LOGS").expect("LOGS ring buffer")) {
+                    Ok(r) => r,
+                    Err(_) => break,
+                };
+            tokio::select! {
+              _ = ctrl_c.as_mut() => break,
+              _ = time::sleep(Duration::from_millis(50)) => {
+                  let mut g = app_drain.lock().await;
+                  drain_log_ring_once(&mut log_ring, &mut *g);
+              }
+          }
+            // `log_ring` dropped here → next iteration can borrow `ebpf` again for `map_mut`
+        }
+        drop(ebpf);
+    });
     let mut tui = Tui::new()?;
-    tui.run(&mut app, &mut log_ring).await?;
-
-    println!("Ctrl-C to exit.");
-    signal::ctrl_c().await?;
-
+    tui.run(app).await?;
     Ok(())
 }

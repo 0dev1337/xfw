@@ -7,5 +7,6 @@ pub struct LogEvent {
     pub protocol: u8,
     pub action: u8,
 }
+
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for LogEvent {}
