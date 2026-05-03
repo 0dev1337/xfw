@@ -1,21 +1,24 @@
 use crate::parse::ptr_at;
 use aya_ebpf::bindings::xdp_action::{XDP_DROP, XDP_PASS};
 use aya_ebpf::macros::map;
-use aya_ebpf::maps::HashMap;
+use aya_ebpf::maps::{HashMap, RingBuf};
 use aya_ebpf::programs::XdpContext;
 use aya_log_ebpf::info;
 use core::net::Ipv4Addr;
 use network_types::{
     eth::{EthHdr, EtherType},
-    icmp::IcmpHdr,
     ip::{IpProto, Ipv4Hdr},
     tcp::TcpHdr,
     udp::UdpHdr,
 };
+use xdp_fw_common::logs::logs::LogEvent;
 use xdp_fw_common::rules::rules::{FlowKey, Rule};
 
 #[map]
 static RULES: HashMap<FlowKey, Rule> = HashMap::with_max_entries(1024, 0);
+
+#[map]
+static LOGS: RingBuf = RingBuf::with_byte_size(1024 * 64, 0);
 
 pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
     let eth: *const EthHdr = ptr_at(&ctx, 0)?;
@@ -66,15 +69,25 @@ pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
         };
     }else{
         let ip = Ipv4Addr::from(src);
-        info!(
-            &ctx,
-            "rule mismatch src={} sport={} dport={} proto={} action={}",
-            ip,
-            source_port,
-            dest_port,
-            protocol,
-            0
-        );
+        // info!(
+        //     &ctx,
+        //     "rule mismatch src={} sport={} dport={} proto={} action={}",
+        //     ip,
+        //     source_port,
+        //     dest_port,
+        //     protocol,
+        //     0
+        // );
+        if let Some(mut slot) = LOGS.reserve::<LogEvent>(0) {
+            slot.write(LogEvent {
+                src_ip: ip.octets(),
+                source_port,
+                dest_port,
+                protocol,
+                action: 0,
+            });
+            slot.submit(0);
+        }
     }
     // if src {
     //     let ip = Ipv4Addr::from(src);
