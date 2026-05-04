@@ -5,7 +5,7 @@ use aya::maps::{HashMap, RingBuf};
 use tokio::{sync::Mutex, time};
 
 use rand::Rng;
-
+use ratatui::text::Line;
 #[allow(unused_imports)]
 use xdp_fw::app::App;
 use xdp_fw::cli::Opt;
@@ -36,11 +36,11 @@ fn drain_log_ring_once(log_ring: &mut RingBuf<&mut aya::maps::MapData>,app: &mut
         //     event.action,
         // );
 
-        app.logs.push(format!("ip={ip} sport={} dport={} proto={} action={}",
-                              event.source_port,
-                              event.dest_port,
-                              event.protocol,
-                              event.action,))
+        app.logs.push(Line::from(format!("ip={ip} sport={} dport={} proto={} action={}",
+                                         event.source_port,
+                                         event.dest_port,
+                                         event.protocol,
+                                         event.action,)))
     }
 }
 
