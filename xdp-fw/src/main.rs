@@ -36,7 +36,7 @@ fn drain_log_ring_once(log_ring: &mut RingBuf<&mut aya::maps::MapData>,app: &mut
         //     event.action,
         // );
 
-        app.logs.push(Line::from(format!("ip={ip} sport={} dport={} proto={} action={}",
+        app.allow_logs.push(Line::from(format!("ip={ip} sport={} dport={} proto={} action={}",
                                          event.source_port,
                                          event.dest_port,
                                          event.protocol,
