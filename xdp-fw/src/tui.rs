@@ -29,7 +29,7 @@ impl Tui {
             let should_exit = {
                 let mut app = app.lock().await;
 
-                self.terminal.draw(|f| ui::draw(f, &mut *app))?;
+                self.terminal.draw(|f| ui::draw(f, &*app))?;
 
                 if crossterm::event::poll(std::time::Duration::from_millis(50))? {
                     let event = crossterm::event::read()?;

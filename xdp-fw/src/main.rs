@@ -1,21 +1,24 @@
 use anyhow::Result;
 use clap::Parser;
-use std::{net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
+
 use aya::maps::{HashMap, RingBuf};
 use tokio::{sync::Mutex, time};
 
-use rand::Rng;
 use ratatui::text::Line;
-#[allow(unused_imports)]
+use xdp_fw::tui::Tui;
+use xdp_fw::{app, util};
 use xdp_fw::app::App;
 use xdp_fw::cli::Opt;
 use xdp_fw::loader::{attach_xdp, bump_memlock_rlimit, init_aya_log, load_ebpf};
-#[allow(unused_imports)]
-use xdp_fw::tui::Tui;
-use xdp_fw_common::logs::logs::LogEvent;
-use xdp_fw_common::rules::rules::{Action, FlowKey, Protocol, Rule};
 
-fn drain_log_ring_once(log_ring: &mut RingBuf<&mut aya::maps::MapData>,app: &mut App) {
+use xdp_fw_common::logs::logs::LogEvent;
+use xdp_fw_common::rules::rules::{Action, Protocol};
+
+fn drain_log_ring_once(
+    log_ring: &mut RingBuf<&mut aya::maps::MapData>,
+    app: &mut App,
+) {
     while let Some(item) = log_ring.next() {
         let data: &[u8] = &*item;
 
@@ -23,58 +26,32 @@ fn drain_log_ring_once(log_ring: &mut RingBuf<&mut aya::maps::MapData>,app: &mut
             continue;
         }
 
-        let event =
-            unsafe { std::ptr::read_unaligned(data.as_ptr().cast::<LogEvent>()) };
+        let event = unsafe {
+            std::ptr::read_unaligned(data.as_ptr().cast::<LogEvent>())
+        };
 
         let ip = std::net::Ipv4Addr::from(event.src_ip);
 
-        // println!(
-        //     "ip={ip} sport={} dport={} proto={} action={}",
-        //     event.source_port,
-        //     event.dest_port,
-        //     event.protocol,
-        //     event.action,
-        // );
+        let msg = Line::from(format!(
+            "ip={ip} sport={} dport={} proto={} action={}",
+            event.source_port,
+            event.dest_port,
+            event.protocol,
+            event.action,
+        ));
 
-        app.allow_logs.push(Line::from(format!("ip={ip} sport={} dport={} proto={} action={}",
-                                         event.source_port,
-                                         event.dest_port,
-                                         event.protocol,
-                                         event.action,)))
+        if event.action == Action::Allow as u8 {
+            app.push_allow(msg);
+        } else {
+            app.push_deny(msg);
+        }
     }
-}
-
-fn insert_rule(
-    rules: &mut HashMap<&mut aya::maps::MapData, FlowKey, Rule>,
-    src_ip: &str,
-    src_port: u16,
-    dest_ip: &str,
-    dest_port: u16,
-    protocol: Protocol,
-    action: Action,
-) -> Result<()> {
-    let src_ip: Ipv4Addr = src_ip.parse()?;
-    let dest_ip: Ipv4Addr = dest_ip.parse()?;
-
-    let key = FlowKey {
-        src_ip: src_ip.octets(),
-    };
-    let rule = Rule {
-        src_ip: src_ip.octets(),
-        src_port,
-        dest_ip: dest_ip.octets(),
-        dest_port,
-        protocol: protocol as u8,
-        action: action as u8,
-    };
-
-    rules.insert(key, rule, 0)?;
-    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let opt = Opt::parse();
+    let app = Arc::new(Mutex::new(App::new()));
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     bump_memlock_rlimit();
 
@@ -85,9 +62,12 @@ async fn main() -> Result<()> {
     attach_xdp(&mut ebpf, &opt.iface)?;
 
     {
+        let mut g = app.lock().await;
+        g.set_ebpf(ebpf);
+        let ebpf = g.ebpf_mut().expect("ebpf set above");
         let mut rules =
             HashMap::try_from(ebpf.map_mut("RULES").expect("RULES map"))?;
-        insert_rule(
+        util::insert_rule(
             &mut rules,
             "1.1.1.2",
             0,
@@ -98,33 +78,33 @@ async fn main() -> Result<()> {
         )?;
     }
 
-    let app = Arc::new(Mutex::new(App::new()));
     let app_drain = Arc::clone(&app);
-
 
     println!("Polling LOGS ring (Ctrl+C to exit).");
 
     let _drain_join = tokio::spawn(async move {
-        let mut ebpf = ebpf;
-
         let ctrl_c = tokio::signal::ctrl_c();
         tokio::pin!(ctrl_c);
         loop {
-            let mut log_ring =
-                match RingBuf::try_from(ebpf.map_mut("LOGS").expect("LOGS ring buffer")) {
-                    Ok(r) => r,
-                    Err(_) => break,
-                };
             tokio::select! {
-              _ = ctrl_c.as_mut() => break,
-              _ = time::sleep(Duration::from_millis(50)) => {
-                  let mut g = app_drain.lock().await;
-                  drain_log_ring_once(&mut log_ring, &mut *g);
-              }
-          }
-            // `log_ring` dropped here → next iteration can borrow `ebpf` again for `map_mut`
+                _ = ctrl_c.as_mut() => break,
+                _ = time::sleep(Duration::from_millis(50)) => {
+                    let mut g = app_drain.lock().await;
+                    let mut ebpf = g.ebpf.take().expect("ebpf");
+                    let mut log_ring = match RingBuf::try_from(
+                        ebpf.map_mut("LOGS").expect("LOGS ring buffer"),
+                    ) {
+                        Ok(r) => r,
+                        Err(_) => {
+                            g.set_ebpf(ebpf);
+                            break;
+                        }
+                    };
+                    drain_log_ring_once(&mut log_ring, &mut *g);
+                    g.set_ebpf(ebpf);
+                }
+            }
         }
-        drop(ebpf);
     });
     let mut tui = Tui::new()?;
     tui.run(app).await?;

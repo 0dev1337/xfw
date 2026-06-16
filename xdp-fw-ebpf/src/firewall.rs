@@ -28,10 +28,13 @@ pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
 
     let ipv4hdr: *const Ipv4Hdr = ptr_at(&ctx, EthHdr::LEN)?;
     let src = unsafe { (*ipv4hdr).src_addr };
+
     let mut protocol: u8 = 0;
     let (source_port, dest_port) = match unsafe { (*ipv4hdr).proto } {
         IpProto::Tcp => {
-            let tcphdr: *const TcpHdr = ptr_at(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
+            let tcphdr: *const TcpHdr =
+                ptr_at(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
+
             protocol = 6;
 
             let src = u16::from_be_bytes(unsafe { (*tcphdr).source });
@@ -39,7 +42,9 @@ pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
             (src, dst)
         }
         IpProto::Udp => {
-            let udphdr: *const UdpHdr = ptr_at(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
+            let udphdr: *const UdpHdr =
+                ptr_at(&ctx, EthHdr::LEN + Ipv4Hdr::LEN)?;
+
             protocol = 17;
 
             let src = unsafe { (*udphdr).src_port() };
@@ -49,37 +54,46 @@ pub fn handle(ctx: XdpContext) -> Result<u32, ()> {
         _ => (0, 0),
     };
 
+    let mut action: u8 = 0; // default PASS
+
     let key = FlowKey { src_ip: src };
+
     if let Some(rule) = unsafe { RULES.get(&key) } {
         let ip = Ipv4Addr::from(rule.src_ip);
-        info!(
-            &ctx,
-            "rule match src={} sport={} dport={} proto={} action={}",
-            ip,
-            rule.src_port,
-            rule.dest_port,
-            rule.protocol,
-            rule.action
-        );
 
-        return match rule.action {
-            0 => Ok(XDP_PASS),
-            1 => Ok(XDP_DROP),
-            _ => Ok(XDP_PASS),
-        };
+        // info!(
+        //     &ctx,
+        //     "rule match src={} sport={} dport={} proto={} action={}",
+        //     ip,
+        //     rule.src_port,
+        //     rule.dest_port,
+        //     rule.protocol,
+        //     rule.action
+        // );
+
+        action = rule.action;
+
     } else {
-        let ip = Ipv4Addr::from(src);
-        if let Some(mut slot) = LOGS.reserve::<LogEvent>(0) {
-            slot.write(LogEvent {
-                src_ip: ip.octets(),
-                source_port,
-                dest_port,
-                protocol,
-                action: 0,
-            });
-            slot.submit(0);
-        }
+        action = 0; // pass by default
     }
 
-    Ok(XDP_PASS)
+    // ✅ ALWAYS LOG (rule hit OR miss)
+    let ip = Ipv4Addr::from(src);
+
+    if let Some(mut slot) = LOGS.reserve::<LogEvent>(0) {
+        slot.write(LogEvent {
+            src_ip: ip.octets(),
+            source_port,
+            dest_port,
+            protocol,
+            action,
+        });
+        slot.submit(0);
+    }
+
+    // FINAL DECISION
+    match action {
+        1 => Ok(XDP_DROP),
+        _ => Ok(XDP_PASS),
+    }
 }
