@@ -48,6 +48,8 @@ pub enum Command {
     Help { topic: Option<String> },
     Block(RuleTarget),
     Allow(RuleTarget),
+    Clear,
+
 }
 
 struct RuleSpec {
@@ -237,6 +239,11 @@ fn parse_protocol(s: &str) -> anyhow::Result<BlockProtocol> {
 }
 
 pub fn handle_input(app: &mut App, input: &str) {
+    if input == "clear"{
+        app.system_logs.clear();
+        app.system_logs.push(Line::from("system logs cleared"));
+        return;
+    }
     match parse(input) {
         Ok(cmd) => execute(app, cmd),
         Err(err) => app.push_system(Line::from(format!("{err:#}"))),
@@ -248,6 +255,7 @@ pub fn execute(app: &mut App, cmd: Command) {
         Command::Help { topic } => show_help(app, topic.as_deref()),
         Command::Block(target) => apply_rule(app, target, Action::Drop, "blocked"),
         Command::Allow(target) => apply_rule(app, target, Action::Allow, "allowed"),
+        Command::Clear => app.system_logs.clear(),
     }
 }
 
