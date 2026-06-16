@@ -8,7 +8,7 @@ pub fn handle_event(app: &mut App, event: Event) {
             KeyCode::Char(c) => app.input.push(c),
             KeyCode::Backspace => { app.input.pop(); }
             KeyCode::Enter => {
-                app.allow_logs.push(Line::from(app.input.clone()));
+                app.system_logs.push(Line::from(app.input.clone()));
                 app.input.clear();
             }
             KeyCode::Esc => app.should_exit = true,
