@@ -1,6 +1,7 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     widgets::*,
+    style::{Color, Style},
     Frame,
 };
 
@@ -41,7 +42,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .block(Block::default().title("System Logs").borders(Borders::ALL))
         .scroll((system_scroll, 0));
 
-    let input = Paragraph::new(app.input.as_str())
+
+    let (text, _) = if app.input.is_empty() {
+        ("help for command utility", Style::default().fg(Color::DarkGray))
+    } else {
+        (app.input.as_str(), Style::default())
+    };
+
+    let input = Paragraph::new(text)
         .block(Block::default().title("Exec").borders(Borders::ALL));
 
     frame.render_widget(allow_logs, top[0]);
