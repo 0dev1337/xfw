@@ -2,19 +2,17 @@ use anyhow::Result;
 use clap::Parser;
 use std::{sync::Arc, time::Duration};
 
-use aya::maps::{HashMap, RingBuf};
+use aya::maps::RingBuf;
 use tokio::{sync::Mutex, time};
 
-use ratatui::text::Line;
 use xdp_fw::tui::Tui;
-use xdp_fw::{app, util};
+use xdp_fw::util;
 use xdp_fw::app::App;
 use xdp_fw::cli::Opt;
 use xdp_fw::loader::{attach_xdp, bump_memlock_rlimit, init_aya_log, load_ebpf};
 
 use xdp_fw_common::logs::logs::LogEvent;
 use xdp_fw_common::rules::rules::{Action, Protocol};
-use chrono::Local;
 fn drain_log_ring_once(
     log_ring: &mut RingBuf<&mut aya::maps::MapData>,
     app: &mut App,
@@ -65,13 +63,14 @@ async fn main() -> Result<()> {
         let mut g = app.lock().await;
         g.set_ebpf(ebpf);
         let ebpf = g.ebpf_mut().expect("ebpf set above");
-        let mut rules =
-            HashMap::try_from(ebpf.map_mut("RULES").expect("RULES map"))?;
+        let (src_ip, src_mask) = util::parse_cidr("1.1.1.2")?;
         util::insert_rule(
-            &mut rules,
-            "1.1.1.2",
+            ebpf,
+            src_ip,
+            src_mask,
             0,
-            "0.0.0.0",
+            0,
+            0,
             0,
             Protocol::Any,
             Action::Drop,
