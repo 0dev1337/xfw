@@ -27,6 +27,7 @@ clap = { version = "4.5.20", default-features = false, features = ["std", "deriv
 ratatui = "0.30.0"
 crossterm = "0.29.0"
 rand = "0.10.1"
+chrono = "0.4.45"
 
 [build-dependencies]
 anyhow = { version = "1", default-features = false }

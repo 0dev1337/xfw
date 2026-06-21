@@ -7,7 +7,7 @@ use xdp_fw_common::rules::rules::{Action, Protocol};
 
 use crate::app::App;
 use crate::util;
-
+use chrono::Local;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockProtocol {
     Tcp,
@@ -60,11 +60,13 @@ struct RuleSpec {
     protocol: BlockProtocol,
 }
 
-const HELP_GENERAL: &[&str] = &[
+pub const HELP_GENERAL: &[&str] = &[
     "commands:",
     "  help [topic]     show help (topics: block, allow)",
     "  block ...        drop matching traffic (alias: deny)",
     "  allow ...        permit matching traffic",
+    "  clear            clear system logs",
+    "  esc              exit the program",
     "examples:",
     "  block 1.2.3.4",
     "  block from 1.2.3.4",
@@ -88,7 +90,7 @@ const HELP_BLOCK: &[&str] = &[
     "protocols: tcp, udp, any",
 ];
 
-const HELP_ALLOW: &[&str] = &[
+pub const HELP_ALLOW: &[&str] = &[
     "allow — permit matching traffic",
     "  allow <ip>",
     "  allow from <ip>",
@@ -241,7 +243,7 @@ fn parse_protocol(s: &str) -> anyhow::Result<BlockProtocol> {
 pub fn handle_input(app: &mut App, input: &str) {
     if input == "clear"{
         app.system_logs.clear();
-        app.system_logs.push(Line::from("system logs cleared"));
+        app.system_logs.push(Line::from(util::system_line("system logs cleared.")));
         return;
     }
     match parse(input) {

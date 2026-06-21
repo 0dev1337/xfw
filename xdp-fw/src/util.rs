@@ -1,7 +1,8 @@
 use std::net::Ipv4Addr;
 use aya::maps::HashMap;
 use xdp_fw_common::rules::rules::{Action, FlowKey, Protocol, Rule};
-
+use chrono::Local;
+use ratatui::text::Line;
 pub fn insert_rule(
     rules: &mut HashMap<&mut aya::maps::MapData, FlowKey, Rule>,
     src_ip: &str,
@@ -30,3 +31,10 @@ pub fn insert_rule(
     Ok(())
 }
 
+pub fn system_line(msg: impl AsRef<str>) -> Line<'static> {
+    Line::from(format!(
+        "[{}] {}",
+        Local::now().format("%H:%M:%S"),
+        msg.as_ref()
+    ))
+}

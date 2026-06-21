@@ -1,6 +1,6 @@
 use aya::Ebpf;
 use ratatui::text::Line;
-
+use crate::command;
 pub struct App {
     pub input: String,
 
@@ -21,7 +21,7 @@ impl App {
             input: String::new(),
             allow_logs: vec![],
             deny_logs: vec![],
-            system_logs: vec![],
+            system_logs: command::HELP_GENERAL.iter().map(|s|Line::from(*s)).collect(),
             should_exit: false,
             ebpf: None,
         }

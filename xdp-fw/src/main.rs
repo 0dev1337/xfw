@@ -14,7 +14,7 @@ use xdp_fw::loader::{attach_xdp, bump_memlock_rlimit, init_aya_log, load_ebpf};
 
 use xdp_fw_common::logs::logs::LogEvent;
 use xdp_fw_common::rules::rules::{Action, Protocol};
-
+use chrono::Local;
 fn drain_log_ring_once(
     log_ring: &mut RingBuf<&mut aya::maps::MapData>,
     app: &mut App,
@@ -32,18 +32,18 @@ fn drain_log_ring_once(
 
         let ip = std::net::Ipv4Addr::from(event.src_ip);
 
-        let msg = Line::from(format!(
+        let msg = format!(
             "ip={ip} sport={} dport={} proto={} action={}",
             event.source_port,
             event.dest_port,
             event.protocol,
             event.action,
-        ));
+        );
 
         if event.action == Action::Allow as u8 {
-            app.push_allow(msg);
+            app.push_allow(util::system_line(msg));
         } else {
-            app.push_deny(msg);
+            app.push_deny(util::system_line(msg));
         }
     }
 }
