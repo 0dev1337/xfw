@@ -241,14 +241,15 @@ fn parse_protocol(s: &str) -> anyhow::Result<BlockProtocol> {
 }
 
 pub fn handle_input(app: &mut App, input: &str) {
-    if input == "clear"{
+    if input == "clear" {
         app.system_logs.clear();
-        app.system_logs.push(Line::from(util::system_line("system logs cleared.")));
+        app.push_system(util::system_line("system logs cleared"));
         return;
     }
+
     match parse(input) {
         Ok(cmd) => execute(app, cmd),
-        Err(err) => app.push_system(Line::from(format!("{err:#}"))),
+        Err(err) => app.push_system(util::system_line(format!("{err:#}"))),
     }
 }
 
@@ -257,7 +258,10 @@ pub fn execute(app: &mut App, cmd: Command) {
         Command::Help { topic } => show_help(app, topic.as_deref()),
         Command::Block(target) => apply_rule(app, target, Action::Drop, "blocked"),
         Command::Allow(target) => apply_rule(app, target, Action::Allow, "allowed"),
-        Command::Clear => app.system_logs.clear(),
+        Command::Clear => {
+            app.system_logs.clear();
+            app.push_system(util::system_line("system logs cleared"));
+        }
     }
 }
 
@@ -267,7 +271,7 @@ fn show_help(app: &mut App, topic: Option<&str>) {
         Some("block") | Some("deny") => HELP_BLOCK,
         Some("allow") => HELP_ALLOW,
         Some(other) => {
-            app.push_system(Line::from(format!(
+            app.push_system(util::system_line(format!(
                 "unknown help topic: {other} (try: block, allow)"
             )));
             return;
@@ -275,10 +279,9 @@ fn show_help(app: &mut App, topic: Option<&str>) {
     };
 
     for line in lines {
-        app.push_system(Line::from(*line));
+        app.push_system(Line::from(*line)); // no timestamp for help
     }
 }
-
 fn rule_target_to_spec(target: RuleTarget) -> (RuleSpec, String) {
     match target {
         RuleTarget::FromIp { ip } => (
@@ -323,7 +326,7 @@ fn apply_rule(app: &mut App, target: RuleTarget, action: Action, verb: &str) {
     let mut ebpf = match app.ebpf.take() {
         Some(ebpf) => ebpf,
         None => {
-            app.push_system(Line::from("eBPF not loaded"));
+            app.push_system(util::system_line("eBPF not loaded"));
             return;
         }
     };
@@ -332,6 +335,7 @@ fn apply_rule(app: &mut App, target: RuleTarget, action: Action, verb: &str) {
         let mut rules = HashMap::try_from(
             ebpf.map_mut("RULES").expect("RULES map"),
         )?;
+
         util::insert_rule(
             &mut rules,
             &spec.src_ip,
@@ -341,14 +345,21 @@ fn apply_rule(app: &mut App, target: RuleTarget, action: Action, verb: &str) {
             spec.protocol.to_protocol(),
             action,
         )?;
+
         Ok(())
     })();
 
     app.set_ebpf(ebpf);
 
     match result {
-        Ok(()) => app.push_system(Line::from(format!("{verb} {desc}"))),
-        Err(err) => app.push_system(Line::from(format!("{verb} {desc} failed: {err:#}"))),
+        Ok(()) => {
+            app.push_system(util::system_line(format!("{verb} {desc}")));
+        }
+        Err(err) => {
+            app.push_system(util::system_line(format!(
+                "{verb} {desc} failed: {err:#}"
+            )));
+        }
     }
 }
 
