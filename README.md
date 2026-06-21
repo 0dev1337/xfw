@@ -14,6 +14,8 @@ A high-performance XDP firewall for Linux with a real-time terminal UI. Rules ar
 ## Architecture
 
 ![XFW Architecture](assets/architecture.png)
+![XFW Wireshark Log](assets/xfw.jpeg)
+![IPTABLES Wireshark Log](assets/iptables.jpeg)
 
 Packets hit the XDP hook before the kernel allocates any socket buffer. The eBPF program scans a shared `RULES` array (bounded by `RULE_COUNT`), applies the first matching rule, and returns `XDP_DROP` or `XDP_PASS`. Every verdict is pushed to a `LOGS` ring buffer that userspace drains every 50ms into the TUI.
 
